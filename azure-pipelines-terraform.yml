@@ -5,15 +5,19 @@ trigger:
 
 pr:
   branches:
-    include:
+                  $commandText = $Arguments -join ' '
+                  Write-Host "Running: terraform $commandText"
+                  & terraform @Arguments
       - main
 
 variables:
   # Agent pool that hosts Terraform and Azure CLI (update to your self-hosted pool name)
   agentPoolName: 'Default'
 
-  # Azure context / Terraform defaults
-  TF_IN_AUTOMATION: 'true'
+                $initArgs = @("-chdir=$tfDir", 'init') + $backendArgs + @('-input=false')
+                Invoke-Terraform -Arguments $initArgs
+
+                Invoke-Terraform -Arguments @("-chdir=$tfDir", 'apply', '-input=false', '-auto-approve', $planPath)
   ARM_SUBSCRIPTION_ID: '910ebf13-1058-405d-b6cf-eda03e5288d1'
   terraformWorkingDirectory: 'modules/databricks-workspace'
 
@@ -98,11 +102,13 @@ stages:
               [string[]]$Arguments
             )
 
-            Write-Host "Running: terraform $($Arguments -join ' ')"
+            $commandText = $Arguments -join ' '
+            Write-Host "Running: terraform $commandText"
             & terraform @Arguments
             $exit = $LASTEXITCODE
             if ($exit -ne 0) {
-              throw "Terraform command failed with exit code $exit: terraform $($Arguments -join ' ')"
+              $message = "Terraform command failed with exit code {0}: terraform {1}" -f $exit, $commandText
+              throw $message
             }
           }
 
@@ -129,14 +135,17 @@ stages:
           }
 
           # IMPORTANT: quote -chdir so $tfDir expands
-          Invoke-Terraform @("-chdir=$tfDir", 'init', @backendArgs, '-input=false')
-          Invoke-Terraform @("-chdir=$tfDir", 'fmt', '-check')
+          $initArgs = @("-chdir=$tfDir", 'init') + $backendArgs + @('-input=false')
+          Invoke-Terraform -Arguments $initArgs
+
+          Invoke-Terraform -Arguments @("-chdir=$tfDir", 'fmt', '-check')
 
           Write-Host "DEBUG: TF_VAR_location = $env:TF_VAR_location"
           Write-Host "DEBUG: TF_VAR_workspace_sku = $env:TF_VAR_workspace_sku"
 
-          Invoke-Terraform @("-chdir=$tfDir", 'validate')
-          Invoke-Terraform @("-chdir=$tfDir", 'plan', '-out=tfplan', '-input=false')
+          Invoke-Terraform -Arguments @("-chdir=$tfDir", 'validate')
+
+          Invoke-Terraform -Arguments @("-chdir=$tfDir", 'plan', '-out=tfplan', '-input=false')
 
           # Persist the plan for later application
           $planDirectory = "$(Pipeline.Workspace)/terraform-plan"
@@ -194,11 +203,13 @@ stages:
                     [string[]]$Arguments
                   )
 
-                  Write-Host "Running: terraform $($Arguments -join ' ')"
+                  $commandText = $Arguments -join ' '
+                  Write-Host "Running: terraform $commandText"
                   & terraform @Arguments
                   $exit = $LASTEXITCODE
                   if ($exit -ne 0) {
-                    throw "Terraform command failed with exit code $exit: terraform $($Arguments -join ' ')"
+                    $message = "Terraform command failed with exit code {0}: terraform {1}" -f $exit, $commandText
+                    throw $message
                   }
                 }
 
@@ -223,5 +234,7 @@ stages:
                   $backendArgs += "-backend-config=key=$(backend_state_key)"
                 }
 
-                Invoke-Terraform @("-chdir=$tfDir", 'init', @backendArgs, '-input=false')
-                Invoke-Terraform @("-chdir=$tfDir", 'apply', '-input=false', '-auto-approve', $planPath)
+                $initArgs = @("-chdir=$tfDir", 'init') + $backendArgs + @('-input=false')
+                Invoke-Terraform -Arguments $initArgs
+
+                Invoke-Terraform -Arguments @("-chdir=$tfDir", 'apply', '-input=false', '-auto-approve', $planPath)

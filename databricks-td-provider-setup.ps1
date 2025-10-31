@@ -263,13 +263,13 @@ function Install-DatabricksProvider {
 
 function Set-DatabricksEnvironmentVariables {
     param(
-        [string]$Host,
+        [Alias('Host')][string]$WorkspaceHost,
         [System.Security.SecureString]$Token,
         [System.EnvironmentVariableTarget]$Scope
     )
 
-    if ([string]::IsNullOrWhiteSpace($Host)) {
-        $Host = Read-Host 'Enter DATABRICKS_HOST (e.g. https://adb-<workspace>.azuredatabricks.net)'
+    if ([string]::IsNullOrWhiteSpace($WorkspaceHost)) {
+        $WorkspaceHost = Read-Host 'Enter DATABRICKS_HOST (e.g. https://adb-<workspace>.azuredatabricks.net)'
     }
 
     if (-not $Token) {
@@ -284,11 +284,11 @@ function Set-DatabricksEnvironmentVariables {
     $plainToken = [Runtime.InteropServices.Marshal]::PtrToStringUni($tokenPtr)
 
     try {
-        [Environment]::SetEnvironmentVariable('DATABRICKS_HOST', $Host, $Scope)
+        [Environment]::SetEnvironmentVariable('DATABRICKS_HOST', $WorkspaceHost, $Scope)
         [Environment]::SetEnvironmentVariable('DATABRICKS_TOKEN', $plainToken, $Scope)
 
         if ($Scope -eq [EnvironmentVariableTarget]::Process) {
-            $env:DATABRICKS_HOST = $Host
+            $env:DATABRICKS_HOST = $WorkspaceHost
             $env:DATABRICKS_TOKEN = $plainToken
         }
 
@@ -328,7 +328,7 @@ if ($ConfigureEnvironment) {
         Write-Host "WhatIf: Would configure Databricks environment variables (scope: $EnvironmentScope)." -ForegroundColor Yellow
     } else {
         $scope = [EnvironmentVariableTarget]::$EnvironmentScope
-        Set-DatabricksEnvironmentVariables -Host $DatabricksHost -Token $DatabricksToken -Scope $scope
+        Set-DatabricksEnvironmentVariables -WorkspaceHost $DatabricksHost -Token $DatabricksToken -Scope $scope
         Write-Host "Restart any open shells or CI agents to pick up environment changes." -ForegroundColor Yellow
     }
 }
