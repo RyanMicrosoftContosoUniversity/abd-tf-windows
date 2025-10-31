@@ -44,6 +44,20 @@ stages:
     - checkout: self
       clean: true
 
+
+    - task: PowerShell@2
+      name: DependenciesCheck
+      displayName: Dependencies Check
+      inputs:
+        targetType: 'inline'
+        script: |
+          Write-Host "PROCESS PATH:"
+              $env:Path -split ';' | ForEach-Object { " - $_" }
+              Write-Host "`nResolve az/pwsh:"
+              $az = Get-Command az -ErrorAction SilentlyContinue
+              $pw = Get-Command pwsh -ErrorAction SilentlyContinue
+              if ($az) { "az => $($az.Source)" } else { "az NOT FOUND" }
+              if ($pw) { "pwsh => $($pw.Source)" } else { "pwsh NOT FOUND" }
     - task: AzureCLI@2
       name: TerraformPlan
       displayName: Terraform init/validate/plan
