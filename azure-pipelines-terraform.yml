@@ -1,0 +1,148 @@
+trigger:
+  branches:
+    include:
+      - main
+
+pr:
+  branches:
+    include:
+      - main
+
+variables:
+  # Agent pool that hosts Terraform and Azure CLI (update to your self-hosted pool name)
+  agentPoolName: 'SELF_HOSTED_POOL_NAME'
+
+  # Azure context / Terraform defaults
+  TF_IN_AUTOMATION: 'true'
+  ARM_SUBSCRIPTION_ID: '910ebf13-1058-405d-b6cf-eda03e5288d1'
+  terraformWorkingDirectory: 'modules/databricks-workspace'
+
+  # Databricks workspace inputs (override via variable groups or pipeline run-time overrides as needed)
+  TF_VAR_workspace_name: 'adf-tf-dev'
+  TF_VAR_resource_group_name: 'adf-tf-rg'
+  TF_VAR_location: 'eastus2'
+  TF_VAR_workspace_sku: 'premium'
+  TF_VAR_service_principal_display_name: 'adb-tf-dev-spn'
+  TF_VAR_service_principal_secret_name: 'adb-tf-dev-spn-secret'
+  TF_VAR_key_vault_id: '/subscriptions/910ebf13-1058-405d-b6cf-eda03e5288d1/resourceGroups/fabric-rg/providers/Microsoft.KeyVault/vaults/kvfabricprodeus2rh'
+
+  # Optional remote state backend (set these when you have a storage account/container ready)
+  backend_storage_account_name: ''
+  backend_resource_group_name: ''
+  backend_container_name: ''
+  backend_state_key: ''
+
+stages:
+- stage: Validate
+  displayName: Terraform Validate & Plan
+  jobs:
+  - job: Plan
+    displayName: Run terraform fmt/validate/plan
+    pool:
+      name: $(agentPoolName)
+    steps:
+    - checkout: self
+      clean: true
+
+    - task: AzureCLI@2
+      name: TerraformPlan
+      displayName: Terraform init/validate/plan
+      inputs:
+        azureSubscription: 'fabric-dc'
+        addSpnToEnvironment: true
+        scriptType: pscore
+        scriptLocation: inlineScript
+        inlineScript: |
+          $ErrorActionPreference = 'Stop'
+          $tfDir = "$(terraformWorkingDirectory)"
+
+          if (-not (Get-Command terraform -ErrorAction SilentlyContinue)) {
+            throw 'Terraform CLI not found on PATH. Install it on the self-hosted agent or invoke tf-setup/tf-setup.ps1 beforehand.'
+          }
+
+          $env:ARM_CLIENT_ID = $env:servicePrincipalId
+          $env:ARM_CLIENT_SECRET = $env:servicePrincipalKey
+          $env:ARM_TENANT_ID = $env:tenantId
+
+          $backendArgs = @()
+          if (![string]::IsNullOrWhiteSpace("$(backend_storage_account_name)")) {
+            if ([string]::IsNullOrWhiteSpace("$(backend_resource_group_name)") -or [string]::IsNullOrWhiteSpace("$(backend_container_name)") -or [string]::IsNullOrWhiteSpace("$(backend_state_key)")) {
+              throw 'backend_resource_group_name, backend_container_name, and backend_state_key must be provided when backend_storage_account_name is set.'
+            }
+
+            $backendArgs += "-backend-config=storage_account_name=$(backend_storage_account_name)"
+            $backendArgs += "-backend-config=resource_group_name=$(backend_resource_group_name)"
+            $backendArgs += "-backend-config=container_name=$(backend_container_name)"
+            $backendArgs += "-backend-config=key=$(backend_state_key)"
+          }
+
+          terraform -chdir=$tfDir init @backendArgs -input=false
+          terraform -chdir=$tfDir fmt -check
+          terraform -chdir=$tfDir validate
+          terraform -chdir=$tfDir plan -out=tfplan -input=false
+
+          # Persist the plan for later application
+          $planDirectory = "$(Pipeline.Workspace)/terraform-plan"
+          New-Item -ItemType Directory -Path $planDirectory -Force | Out-Null
+          Copy-Item -Path (Join-Path $tfDir 'tfplan') -Destination $planDirectory -Force
+
+    - publish: "$(Pipeline.Workspace)/terraform-plan"
+      artifact: tfplan
+      displayName: Publish tfplan artifact
+
+- stage: Deploy
+  displayName: Terraform Apply
+  dependsOn: Validate
+  condition: succeeded('Validate')
+  jobs:
+  - deployment: Apply
+    displayName: terraform apply (manual approval recommended)
+    environment: databricks-workspace
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - checkout: self
+            clean: true
+
+          - download: current
+            artifact: tfplan
+
+          - task: AzureCLI@2
+            displayName: Terraform init/apply
+            inputs:
+              azureSubscription: 'fabric-dc'
+              addSpnToEnvironment: true
+              scriptType: pscore
+              scriptLocation: inlineScript
+              inlineScript: |
+                $ErrorActionPreference = 'Stop'
+                $tfDir = "$(terraformWorkingDirectory)"
+                $planPath = Join-Path "$(Pipeline.Workspace)/tfplan" 'tfplan'
+
+                if (-not (Get-Command terraform -ErrorAction SilentlyContinue)) {
+                  throw 'Terraform CLI not found on PATH. Install it on the self-hosted agent or invoke tf-setup/tf-setup.ps1 beforehand.'
+                }
+
+                if (-not (Test-Path $planPath)) {
+                  throw "Terraform plan not found at $planPath"
+                }
+
+                $env:ARM_CLIENT_ID = $env:servicePrincipalId
+                $env:ARM_CLIENT_SECRET = $env:servicePrincipalKey
+                $env:ARM_TENANT_ID = $env:tenantId
+
+                $backendArgs = @()
+                if (![string]::IsNullOrWhiteSpace("$(backend_storage_account_name)")) {
+                  if ([string]::IsNullOrWhiteSpace("$(backend_resource_group_name)") -or [string]::IsNullOrWhiteSpace("$(backend_container_name)") -or [string]::IsNullOrWhiteSpace("$(backend_state_key)")) {
+                    throw 'backend_resource_group_name, backend_container_name, and backend_state_key must be provided when backend_storage_account_name is set.'
+                  }
+
+                  $backendArgs += "-backend-config=storage_account_name=$(backend_storage_account_name)"
+                  $backendArgs += "-backend-config=resource_group_name=$(backend_resource_group_name)"
+                  $backendArgs += "-backend-config=container_name=$(backend_container_name)"
+                  $backendArgs += "-backend-config=key=$(backend_state_key)"
+                }
+
+                terraform -chdir=$tfDir init @backendArgs -input=false
+                terraform -chdir=$tfDir apply -input=false -auto-approve $planPath
