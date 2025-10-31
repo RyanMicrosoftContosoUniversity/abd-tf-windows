@@ -4,11 +4,11 @@ terraform {
   required_providers {
     azurerm = {
       source  = "hashicorp/azurerm"
-      version = "~> 4.0"   # stays on v4.x
+      version = "~> 4.0" # stays on v4.x
     }
     azuread = {
       source  = "hashicorp/azuread"
-      version = "~> 3.0"   # v3.x semantics
+      version = "~> 3.0" # v3.x semantics
     }
   }
 }
@@ -37,8 +37,8 @@ resource "azuread_application" "databricks" {
 
 # Compute handles for "the application we will use"
 locals {
-  created_application   = try(azuread_application.databricks[0], null)
-  existing_application  = try(data.azuread_application.existing[0], null)
+  created_application  = try(azuread_application.databricks[0], null)
+  existing_application = try(data.azuread_application.existing[0], null)
 
   # v3: id = object ID; application_id = app (client) ID
   application_object_id = coalesce(
@@ -69,7 +69,7 @@ locals {
   existing_service_principal = try(data.azuread_service_principal.existing[0], null)
 
   service_principal_object_id = coalesce(
-    try(local.created_service_principal.id, null),     # object ID
+    try(local.created_service_principal.id, null), # object ID
     try(local.existing_service_principal.id, null)
   )
 
@@ -81,8 +81,8 @@ locals {
 # v3: expects application_id = **object ID** of the application (not client ID)
 resource "azuread_application_password" "databricks" {
   application_object_id = local.application_object_id
-  display_name      = var.service_principal_secret_display_name
-  end_date_relative = format("%dh", local.secret_duration_hours)
+  display_name          = var.service_principal_secret_display_name
+  end_date_relative     = format("%dh", local.secret_duration_hours)
 }
 
 resource "azurerm_key_vault_secret" "databricks_spn" {
