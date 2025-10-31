@@ -62,7 +62,7 @@ stages:
       name: TerraformPlan
       displayName: Terraform init/validate/plan
       inputs:
-        azureSubscription: 'fabric-dc'
+        azureSubscription: 'fabric-sc'
         addSpnToEnvironment: true
         scriptType: pscore
         scriptLocation: inlineScript
@@ -160,7 +160,7 @@ stages:
           - task: AzureCLI@2
             displayName: Terraform init/apply
             inputs:
-              azureSubscription: 'fabric-dc'
+              azureSubscription: 'fabric-sc'
               addSpnToEnvironment: true
               scriptType: pscore
               scriptLocation: inlineScript
