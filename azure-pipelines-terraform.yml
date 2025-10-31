@@ -66,39 +66,52 @@ stages:
         addSpnToEnvironment: true
         scriptType: pscore
         scriptLocation: inlineScript
+        
         inlineScript: |
           $ErrorActionPreference = 'Stop'
-          $tfDir = "$(terraformWorkingDirectory)"
 
-          if (-not (Get-Command terraform -ErrorAction SilentlyContinue)) {
-            throw 'Terraform CLI not found on PATH. Install it on the self-hosted agent or invoke tf-setup/tf-setup.ps1 beforehand.'
+          # Resolve absolute TF working directory under the repo root
+          $repoRoot = "$(System.DefaultWorkingDirectory)"
+          $tfDir = Join-Path $repoRoot "$(terraformWorkingDirectory)"
+
+          Write-Host "Repo root: $repoRoot"
+          Write-Host "Terraform dir: $tfDir"
+          if (-not (Test-Path $tfDir)) {
+            throw "Terraform directory not found: $tfDir"
           }
 
-          $env:ARM_CLIENT_ID = $env:servicePrincipalId
+          if (-not (Get-Command terraform -ErrorAction SilentlyContinue)) {
+            throw 'Terraform CLI not found on PATH. Install it on the self-hosted agent or run a setup step first.'
+          }
+
+          # Map AzureCLI service principal env to Terraform azurerm provider
+          $env:ARM_CLIENT_ID     = $env:servicePrincipalId
           $env:ARM_CLIENT_SECRET = $env:servicePrincipalKey
-          $env:ARM_TENANT_ID = $env:tenantId
+          $env:ARM_TENANT_ID     = $env:tenantId
+          $env:ARM_SUBSCRIPTION_ID = '$(ARM_SUBSCRIPTION_ID)'
 
           $backendArgs = @()
           if (![string]::IsNullOrWhiteSpace("$(backend_storage_account_name)")) {
             if ([string]::IsNullOrWhiteSpace("$(backend_resource_group_name)") -or [string]::IsNullOrWhiteSpace("$(backend_container_name)") -or [string]::IsNullOrWhiteSpace("$(backend_state_key)")) {
               throw 'backend_resource_group_name, backend_container_name, and backend_state_key must be provided when backend_storage_account_name is set.'
             }
-
             $backendArgs += "-backend-config=storage_account_name=$(backend_storage_account_name)"
             $backendArgs += "-backend-config=resource_group_name=$(backend_resource_group_name)"
             $backendArgs += "-backend-config=container_name=$(backend_container_name)"
             $backendArgs += "-backend-config=key=$(backend_state_key)"
           }
 
-          terraform -chdir=$tfDir init @backendArgs -input=false
-          terraform -chdir=$tfDir fmt -check
-          terraform -chdir=$tfDir validate
-          terraform -chdir=$tfDir plan -out=tfplan -input=false
+          # IMPORTANT: quote -chdir so $tfDir expands
+          terraform -chdir="$tfDir" init @backendArgs -input=false
+          terraform -chdir="$tfDir" fmt -check
+          terraform -chdir="$tfDir" validate
+          terraform -chdir="$tfDir" plan -out=tfplan -input=false
 
           # Persist the plan for later application
           $planDirectory = "$(Pipeline.Workspace)/terraform-plan"
           New-Item -ItemType Directory -Path $planDirectory -Force | Out-Null
           Copy-Item -Path (Join-Path $tfDir 'tfplan') -Destination $planDirectory -Force
+
 
     - publish: "$(Pipeline.Workspace)/terraform-plan"
       artifact: tfplan
