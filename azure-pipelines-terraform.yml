@@ -113,6 +113,10 @@ stages:
           # IMPORTANT: quote -chdir so $tfDir expands
           terraform -chdir="$tfDir" init @backendArgs -input=false
           terraform -chdir="$tfDir" fmt -check
+
+          Write-Host "DEBUG: TF_VAR_location = $env:TF_VAR_location"
+          Write-Host "DEBUG: TF_VAR_workspace_sku = $env:TF_VAR_workspace_sku"
+
           terraform -chdir="$tfDir" validate
           terraform -chdir="$tfDir" plan -out=tfplan -input=false
 
