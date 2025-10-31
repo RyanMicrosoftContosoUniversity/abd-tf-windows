@@ -68,6 +68,15 @@ stages:
         scriptLocation: inlineScript
         
         inlineScript: |
+          # Export pipeline variables to environment for Terraform
+          $env:TF_VAR_workspace_name                 = "$(TF_VAR_workspace_name)"
+          $env:TF_VAR_resource_group_name            = "$(TF_VAR_resource_group_name)"
+          $env:TF_VAR_location                       = "$(TF_VAR_location)"
+          $env:TF_VAR_workspace_sku                  = "$(TF_VAR_workspace_sku)"
+          $env:TF_VAR_service_principal_display_name = "$(TF_VAR_service_principal_display_name)"
+          $env:TF_VAR_service_principal_secret_name  = "$(TF_VAR_service_principal_secret_name)"
+          $env:TF_VAR_key_vault_id                   = "$(TF_VAR_key_vault_id)"
+
           $ErrorActionPreference = 'Stop'
 
           # Resolve absolute TF working directory under the repo root
