@@ -5,19 +5,12 @@ trigger:
 
 pr:
   branches:
-                  $commandText = $Arguments -join ' '
-                  Write-Host "Running: terraform $commandText"
-                  & terraform @Arguments
+    include:
       - main
 
 variables:
   # Agent pool that hosts Terraform and Azure CLI (update to your self-hosted pool name)
   agentPoolName: 'Default'
-
-                $initArgs = @("-chdir=$tfDir", 'init') + $backendArgs + @('-input=false')
-                Invoke-Terraform -Arguments $initArgs
-
-                Invoke-Terraform -Arguments @("-chdir=$tfDir", 'apply', '-input=false', '-auto-approve', $planPath)
   ARM_SUBSCRIPTION_ID: '910ebf13-1058-405d-b6cf-eda03e5288d1'
   terraformWorkingDirectory: 'modules/databricks-workspace'
 
