@@ -4,68 +4,83 @@ terraform {
   required_providers {
     azurerm = {
       source  = "hashicorp/azurerm"
-      version = ">= 3.104.0"
+      version = "~> 4.0"   # stays on v4.x
     }
-
     azuread = {
       source  = "hashicorp/azuread"
-      version = ">= 2.50.0"
+      version = "~> 3.0"   # v3.x semantics
     }
   }
 }
 
-provider "azurerm" {
-  features {}
-}
-
+provider "azurerm" { features {} }
 provider "azuread" {}
 
-# Capture current client information (tenant ID is required for Databricks auth binding outputs)
+# Current client
 data "azurerm_client_config" "current" {}
 
-data "azuread_applications" "existing" {
-  filter = format("displayName eq '%s'", replace(var.service_principal_display_name, "'", "''"))
+# If the caller supplied an existing app object ID, read it; otherwise, skip.
+data "azuread_application" "existing" {
+  count     = var.existing_application_object_id != "" ? 1 : 0
+  object_id = var.existing_application_object_id
 }
 
-data "azuread_service_principals" "existing" {
-  filter = format("displayName eq '%s'", replace(var.service_principal_display_name, "'", "''"))
+# Create a new AAD application if we were not given one.
+resource "azuread_application" "databricks" {
+  count                   = var.existing_application_object_id == "" ? 1 : 0
+  display_name            = var.service_principal_display_name
+  owners                  = var.application_owner_object_ids
+  prevent_duplicate_names = true
+}
+
+# Compute handles for "the application we will use"
+locals {
+  created_application   = try(azuread_application.databricks[0], null)
+  existing_application  = try(data.azuread_application.existing[0], null)
+
+  # v3: id = object ID; application_id = app (client) ID
+  application_object_id = coalesce(
+    try(local.created_application.id, null),
+    try(local.existing_application.id, null)
+  )
+  application_client_id = coalesce(
+    try(local.created_application.application_id, null),
+    try(local.existing_application.application_id, null)
+  )
+}
+
+# If we are reusing an app, try to read its service principal; otherwise we will create it
+data "azuread_service_principal" "existing" {
+  count          = var.existing_application_object_id != "" ? 1 : 0
+  application_id = local.application_client_id
+}
+
+resource "azuread_service_principal" "databricks" {
+  count = var.existing_application_object_id == "" ? 1 : 0
+
+  # v3: still uses the application's client (app) ID
+  application_id = local.application_client_id
 }
 
 locals {
-  existing_application          = try(data.azuread_applications.existing.applications[0], null)
-  create_application            = local.existing_application == null
-  created_application           = try(azuread_application.databricks[0], null)
-  existing_service_principal    = try(data.azuread_service_principals.existing.service_principals[0], null)
-  create_service_principal      = local.existing_service_principal == null
-  created_service_principal     = try(azuread_service_principal.databricks[0], null)
-  application_object_id         = coalesce(try(local.created_application.object_id, null), try(local.existing_application.object_id, null))
-  application_client_id         = coalesce(try(local.created_application.application_id, null), try(local.existing_application.app_id, null))
-  service_principal_object_id   = coalesce(try(local.created_service_principal.object_id, null), try(local.existing_service_principal.object_id, null))
+  created_service_principal  = try(azuread_service_principal.databricks[0], null)
+  existing_service_principal = try(data.azuread_service_principal.existing[0], null)
+
+  service_principal_object_id = coalesce(
+    try(local.created_service_principal.id, null),     # object ID
+    try(local.existing_service_principal.id, null)
+  )
+
   secret_duration_hours         = var.service_principal_secret_validity_days * 24
   managed_resource_group_name   = coalesce(var.managed_resource_group_name, format("%s-managed-rg", var.workspace_name))
   service_principal_secret_name = var.service_principal_secret_name
 }
 
-resource "azuread_application" "databricks" {
-  count                = local.create_application ? 1 : 0
-  display_name         = var.service_principal_display_name
-  owners               = var.application_owner_object_ids
-  prevent_duplicate_names = true
-}
-
-resource "azuread_service_principal" "databricks" {
-  count = local.create_service_principal ? 1 : 0
-
-  application_id = coalesce(
-    try(local.created_application.application_id, null),
-    try(local.existing_application.app_id, null)
-  )
-}
-
+# v3: expects application_id = **object ID** of the application (not client ID)
 resource "azuread_application_password" "databricks" {
   application_object_id = local.application_object_id
-  display_name          = var.service_principal_secret_display_name
-  end_date_relative     = format("%dh", local.secret_duration_hours)
+  display_name      = var.service_principal_secret_display_name
+  end_date_relative = format("%dh", local.secret_duration_hours)
 }
 
 resource "azurerm_key_vault_secret" "databricks_spn" {

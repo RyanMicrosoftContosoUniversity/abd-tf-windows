@@ -29,6 +29,12 @@ variable "managed_resource_group_name" {
   default     = null
 }
 
+variable "existing_application_object_id" {
+  description = "Optional Azure AD application object ID to reuse instead of creating a new application."
+  type        = string
+  default     = ""
+}
+
 variable "service_principal_display_name" {
   description = "Display name of the Azure AD application/service principal used for Databricks automation."
   type        = string

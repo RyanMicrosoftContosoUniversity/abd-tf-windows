@@ -62,11 +62,10 @@ stages:
       name: TerraformPlan
       displayName: Terraform init/validate/plan
       inputs:
-        azureSubscription: 'fabric-sc'
+        azureSubscription: 'fabric-dc'
         addSpnToEnvironment: true
         scriptType: pscore
         scriptLocation: inlineScript
-        
         inlineScript: |
           # Export pipeline variables to environment for Terraform
           $env:TF_VAR_workspace_name                 = "$(TF_VAR_workspace_name)"
@@ -99,6 +98,11 @@ stages:
           $env:ARM_TENANT_ID     = $env:tenantId
           $env:ARM_SUBSCRIPTION_ID = '$(ARM_SUBSCRIPTION_ID)'
 
+          Write-Host "TF_VAR_workspace_name: $($env:TF_VAR_workspace_name)"
+          Write-Host "TF_VAR_service_principal_display_name: $($env:TF_VAR_service_principal_display_name)"
+          Write-Host "TF_VAR_service_principal_secret_name: $($env:TF_VAR_service_principal_secret_name)"
+          Write-Host "TF_VAR_key_vault_id: $($env:TF_VAR_key_vault_id)"
+
           $backendArgs = @()
           if (![string]::IsNullOrWhiteSpace("$(backend_storage_account_name)")) {
             if ([string]::IsNullOrWhiteSpace("$(backend_resource_group_name)") -or [string]::IsNullOrWhiteSpace("$(backend_container_name)") -or [string]::IsNullOrWhiteSpace("$(backend_state_key)")) {
@@ -123,7 +127,12 @@ stages:
           # Persist the plan for later application
           $planDirectory = "$(Pipeline.Workspace)/terraform-plan"
           New-Item -ItemType Directory -Path $planDirectory -Force | Out-Null
-          Copy-Item -Path (Join-Path $tfDir 'tfplan') -Destination $planDirectory -Force
+          $planSource = Join-Path $tfDir 'tfplan'
+          if (Test-Path $planSource) {
+            Copy-Item -Path $planSource -Destination $planDirectory -Force
+          } else {
+            throw "Terraform plan output not found at $planSource. terraform plan likely failed."
+          }
 
 
     - publish: "$(Pipeline.Workspace)/terraform-plan"
@@ -151,13 +160,14 @@ stages:
           - task: AzureCLI@2
             displayName: Terraform init/apply
             inputs:
-              azureSubscription: 'fabric-sc'
+              azureSubscription: 'fabric-dc'
               addSpnToEnvironment: true
               scriptType: pscore
               scriptLocation: inlineScript
               inlineScript: |
                 $ErrorActionPreference = 'Stop'
-                $tfDir = "$(terraformWorkingDirectory)"
+                $repoRoot = "$(System.DefaultWorkingDirectory)"
+                $tfDir = Join-Path $repoRoot "$(terraformWorkingDirectory)"
                 $planPath = Join-Path "$(Pipeline.Workspace)/tfplan" 'tfplan'
 
                 if (-not (Get-Command terraform -ErrorAction SilentlyContinue)) {
@@ -171,6 +181,7 @@ stages:
                 $env:ARM_CLIENT_ID = $env:servicePrincipalId
                 $env:ARM_CLIENT_SECRET = $env:servicePrincipalKey
                 $env:ARM_TENANT_ID = $env:tenantId
+                $env:ARM_SUBSCRIPTION_ID = '$(ARM_SUBSCRIPTION_ID)'
 
                 $backendArgs = @()
                 if (![string]::IsNullOrWhiteSpace("$(backend_storage_account_name)")) {
@@ -184,5 +195,5 @@ stages:
                   $backendArgs += "-backend-config=key=$(backend_state_key)"
                 }
 
-                terraform -chdir=$tfDir init @backendArgs -input=false
-                terraform -chdir=$tfDir apply -input=false -auto-approve $planPath
+                terraform -chdir="$tfDir" init @backendArgs -input=false
+                terraform -chdir="$tfDir" apply -input=false -auto-approve $planPath
