@@ -92,6 +92,20 @@ stages:
             throw 'Terraform CLI not found on PATH. Install it on the self-hosted agent or run a setup step first.'
           }
 
+          function Invoke-Terraform {
+            param(
+              [Parameter(Mandatory = $true, Position = 0)]
+              [string[]]$Arguments
+            )
+
+            Write-Host "Running: terraform $($Arguments -join ' ')"
+            & terraform @Arguments
+            $exit = $LASTEXITCODE
+            if ($exit -ne 0) {
+              throw "Terraform command failed with exit code $exit: terraform $($Arguments -join ' ')"
+            }
+          }
+
           # Map AzureCLI service principal env to Terraform azurerm provider
           $env:ARM_CLIENT_ID     = $env:servicePrincipalId
           $env:ARM_CLIENT_SECRET = $env:servicePrincipalKey
@@ -115,14 +129,14 @@ stages:
           }
 
           # IMPORTANT: quote -chdir so $tfDir expands
-          terraform -chdir="$tfDir" init @backendArgs -input=false
-          terraform -chdir="$tfDir" fmt -check
+          Invoke-Terraform @("-chdir=$tfDir", 'init', @backendArgs, '-input=false')
+          Invoke-Terraform @("-chdir=$tfDir", 'fmt', '-check')
 
           Write-Host "DEBUG: TF_VAR_location = $env:TF_VAR_location"
           Write-Host "DEBUG: TF_VAR_workspace_sku = $env:TF_VAR_workspace_sku"
 
-          terraform -chdir="$tfDir" validate
-          terraform -chdir="$tfDir" plan -out=tfplan -input=false
+          Invoke-Terraform @("-chdir=$tfDir", 'validate')
+          Invoke-Terraform @("-chdir=$tfDir", 'plan', '-out=tfplan', '-input=false')
 
           # Persist the plan for later application
           $planDirectory = "$(Pipeline.Workspace)/terraform-plan"
@@ -174,6 +188,20 @@ stages:
                   throw 'Terraform CLI not found on PATH. Install it on the self-hosted agent or invoke tf-setup/tf-setup.ps1 beforehand.'
                 }
 
+                function Invoke-Terraform {
+                  param(
+                    [Parameter(Mandatory = $true, Position = 0)]
+                    [string[]]$Arguments
+                  )
+
+                  Write-Host "Running: terraform $($Arguments -join ' ')"
+                  & terraform @Arguments
+                  $exit = $LASTEXITCODE
+                  if ($exit -ne 0) {
+                    throw "Terraform command failed with exit code $exit: terraform $($Arguments -join ' ')"
+                  }
+                }
+
                 if (-not (Test-Path $planPath)) {
                   throw "Terraform plan not found at $planPath"
                 }
@@ -195,5 +223,5 @@ stages:
                   $backendArgs += "-backend-config=key=$(backend_state_key)"
                 }
 
-                terraform -chdir="$tfDir" init @backendArgs -input=false
-                terraform -chdir="$tfDir" apply -input=false -auto-approve $planPath
+                Invoke-Terraform @("-chdir=$tfDir", 'init', @backendArgs, '-input=false')
+                Invoke-Terraform @("-chdir=$tfDir", 'apply', '-input=false', '-auto-approve', $planPath)
